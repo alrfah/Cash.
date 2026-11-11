@@ -458,35 +458,25 @@ async function send(){
  if(!/^SY\d{24}$/.test(to)){m.textContent="رقم الحساب يجب أن يكون SY + 24 رقمًا (26 خانة)";return}
  if(to===me.id){m.textContent="لا يمكن التحويل لحسابك";return}
  if(!(am>0)){m.textContent="أدخل مبلغًا صحيحًا";return}
- const btn=$("#sb");if(!btn||btn.disabled)return;btn.disabled=true;btn.textContent="جارٍ التحقق…";
- try{
-  const [senderSnap,recipientSnap]=await Promise.all([ref("accounts/"+me.id).once("value"),ref("accounts/"+to).once("value")]);
-  if(!recipientSnap.exists()){m.textContent="الحساب المستلم غير موجود";return}
-  const sender=senderSnap.val()||{},recipient=recipientSnap.val()||{};
-  const fee=transferFee(sc),totalDebit=am+fee;
-  if(Number(sender[sc]||0)<totalDebit){m.textContent=`الرصيد غير كافٍ؛ المبلغ المطلوب مع العمولة ${fmt(totalDebit)} ${CS[sc]}`;return}
-  window.__pendingTransfer={to,am,c:sc,fee,totalDebit,sender,recipient};
-  const name=recipient.fullname||recipient.username||"بدون اسم";
-  sheet(`<div class="permission-card" style="text-align:right"><div class="permission-icon">${I("send",32)}</div><h2 style="text-align:center">تأكيد إرسال الحوالة</h2><p style="text-align:center">هل أنت متأكد من إرسال الحوالة إلى المستلم التالي؟</p><div class="receipt-table" style="margin-top:14px"><div class="receipt-row"><span>اسم المستلم</span><b>${esc(name)}</b></div><div class="receipt-row"><span>رقم الحساب</span><b dir="ltr" style="font-size:12px">${esc(to)}</b></div><div class="receipt-row"><span>المبلغ</span><b dir="ltr">${fmt(am)} ${CS[sc]}</b></div><div class="receipt-row"><span>العمولة</span><b dir="ltr">${fmt(fee)} ${CS[sc]}</b></div><div class="receipt-row"><span>الإجمالي من رصيدك</span><b dir="ltr">${fmt(totalDebit)} ${CS[sc]}</b></div></div><div class="msg" id="transferConfirmMsg"></div><button class="btn" id="transferConfirmBtn">نعم، تأكيد الإرسال</button><button class="btn g" onclick="sheet(null);sendSheet('${esc(to)}')">إلغاء</button></div>`);
-  $("#transferConfirmBtn").onclick=transferExecute;
- }catch(e){const code=String(e&&e.code||"");m.textContent=code.includes("permission-denied")?"لا تملك صلاحية قراءة بيانات الحوالة؛ تحقق من قواعد Firebase":code.includes("network")?"تعذر الاتصال بـ Firebase؛ تحقق من الإنترنت":"تعذر قراءة بيانات المستلم؛ تأكد من رقم الحساب SY ثم حاول مرة أخرى"}
- finally{if(btn&&btn.isConnected){btn.disabled=false;btn.textContent="تأكيد الإرسال"}}
+ const fee=transferFee(sc),totalDebit=am+fee;
+ if(Number(me[sc]||0)<totalDebit){m.textContent=`الرصيد غير كافٍ؛ المبلغ المطلوب مع العمولة ${fmt(totalDebit)} ${CS[sc]}`;return}
+ const btn=$("#sb");if(!btn||btn.disabled)return;btn.disabled=true;btn.textContent="جارٍ تجهيز التأكيد…";
+ window.__pendingTransfer={to,am,c:sc,fee,totalDebit};
+ sheet(`<div class="permission-card" style="text-align:right"><div class="permission-icon">${I("send",32)}</div><h2 style="text-align:center">تأكيد إرسال الحوالة</h2><p style="text-align:center">هل أنت متأكد من إرسال الحوالة إلى الحساب التالي؟</p><div class="receipt-table" style="margin-top:14px"><div class="receipt-row"><span>رقم حساب المستلم</span><b dir="ltr" style="font-size:12px">${esc(to)}</b></div><div class="receipt-row"><span>المبلغ</span><b dir="ltr">${fmt(am)} ${CS[sc]}</b></div><div class="receipt-row"><span>العمولة</span><b dir="ltr">${fmt(fee)} ${CS[sc]}</b></div><div class="receipt-row"><span>الإجمالي من رصيدك</span><b dir="ltr">${fmt(totalDebit)} ${CS[sc]}</b></div></div><div class="msg" id="transferConfirmMsg"></div><button class="btn" id="transferConfirmBtn">نعم، تأكيد الإرسال</button><button class="btn g" onclick="sheet(null);sendSheet('${esc(to)}')">إلغاء</button></div>`);
+ $("#transferConfirmBtn").onclick=transferExecute;
+ if(btn&&btn.isConnected){btn.disabled=false;btn.textContent="تأكيد الإرسال"}
 }
 async function transferExecute(){
- const p=window.__pendingTransfer;if(!p)return;const b=$("#transferConfirmBtn"),m=$("#transferConfirmMsg");if(b)b.disabled=true;if(b)b.textContent="جارٍ تنفيذ الحوالة…";
+ const p=window.__pendingTransfer;if(!p)return;const b=$("#transferConfirmBtn"),m=$("#transferConfirmMsg");if(b){b.disabled=true;b.textContent="جارٍ تنفيذ الحوالة…"}
  try{
-  const [senderSnap,recipientSnap,adminSnap]=await Promise.all([ref("accounts/"+me.id).once("value"),ref("accounts/"+p.to).once("value"),ref("accounts/"+ADMIN_ACCOUNT_ID).once("value")]);
-  if(!senderSnap.exists()){m.textContent="تعذر قراءة رصيد المرسل؛ أعد تسجيل الدخول وحاول مرة أخرى";return}
-  if(!recipientSnap.exists()){m.textContent="رقم حساب المستلم غير موجود أو غير صحيح";return}
-  if(!adminSnap.exists()){m.textContent="حساب العمولة غير متاح حاليًا؛ تواصل مع الإدارة";return}
-  if(ADMIN_ACCOUNT_ID===me.id||ADMIN_ACCOUNT_ID===p.to){m.textContent="بيانات حساب العمولة غير صحيحة؛ تواصل مع الإدارة";return}
-  const adminAccount=adminSnap.val()||{},sender=senderSnap.val()||{},recipient=recipientSnap.val()||{},fee=transferFee(p.c),totalDebit=p.am+fee;
-  if(Number(sender[p.c]||0)<totalDebit){m.textContent=`الرصيد غير كافٍ؛ المبلغ المطلوب مع العمولة ${fmt(totalDebit)} ${CS[p.c]}`;return}
-  const ts=Date.now(),txRef=ref("tx").push(),noticeRef=ref("userNotifications/"+p.to).push(),senderName=sender.fullname||sender.username||me.id,recipientName=recipient.fullname||recipient.username||p.to;
-  const t={from:me.id,to:p.to,fromName:senderName,toName:recipientName,amount:p.am,fee,totalDebit,cur:p.c,type:"transfer",label:"حوالة",ts,id:txRef.key};
-  const updates={};updates["accounts/"+me.id+"/"+p.c]=Number(sender[p.c]||0)-totalDebit;updates["accounts/"+p.to+"/"+p.c]=Number(recipient[p.c]||0)+p.am;updates["accounts/"+ADMIN_ACCOUNT_ID+"/"+p.c]=Number(adminAccount[p.c]||0)+fee;updates["tx/"+txRef.key]=t;updates["userNotifications/"+p.to+"/"+noticeRef.key]={type:"transfer",title:"حوالة واردة",text:`وصلتك حوالة بقيمة ${fmt(p.am)} ${CS[p.c]} من ${senderName}`,amount:p.am,fee,cur:p.c,from:me.id,fromName:senderName,to:p.to,toName:recipientName,ts,read:false,txId:txRef.key};
-  await rtdb.ref().update(updates);window.__pendingTransfer=null;fullSuccess(t);
- }catch(e){m.textContent=String(e&&e.code||"").includes("permission-denied")?"قواعد Firebase تمنع تنفيذ الحوالة":"تعذر تنفيذ الحوالة؛ حاول مرة أخرى"}finally{if(b&&b.isConnected){b.disabled=false;b.textContent="نعم، تأكيد الإرسال"}}
+  const call=firebase.functions().httpsCallable("transferFunds");
+  const result=await call({to:p.to,cur:p.c,amount:p.am});
+  const t=(result.data&&result.data.transfer)||{from:me.id,to:p.to,amount:p.am,fee:p.fee,totalDebit:p.totalDebit,cur:p.c,type:"transfer",label:"حوالة",ts:Date.now()};
+  window.__pendingTransfer=null;fullSuccess(t);
+ }catch(e){
+  const code=String(e&&e.code||"");
+  m.textContent=code.includes("not-found")?"رقم حساب المستلم غير موجود":code.includes("failed-precondition")?String(e.message||"تعذر تنفيذ الحوالة؛ تحقق من الرصيد والعمولة"):code.includes("permission-denied")?"لا تملك صلاحية تنفيذ الحوالة؛ تحقق من تسجيل الدخول":"تعذر تنفيذ الحوالة من الخادم؛ يجب نشر Firebase Functions ثم المحاولة مرة أخرى";
+ }finally{if(b&&b.isConnected){b.disabled=false;b.textContent="نعم، تأكيد الإرسال"}}
 }
 async function refreshCurrentSession(){
  const pl=$("#pullLoader"),label=pl&&pl.querySelector(".pull-label");
