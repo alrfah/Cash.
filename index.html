@@ -561,7 +561,7 @@ async function pay(i){
   sheet(null);
  }catch(e){m.textContent=e&&e.code==="permission-denied"?"لا يمكنك تنفيذ العملية لأن رصيدك معلّق. تواصل مع الإدارة":"تعذر تنفيذ الدفع؛ حاول مرة أخرى"}finally{if(btn&&btn.isConnected){btn.disabled=false;btn.textContent="دفع"}}
 }
-(async()=>{authView();auth.onAuthStateChanged(async user=>{if(!user)return;let id=null;try{id=localStorage.getItem("rc_id")}catch(e){}if(id){const s=await db.doc("accounts/"+id).get();if(s.exists()&&s.data().uid===user.uid)start(id,s.data());}})})();
+(async()=>{splash();auth.onAuthStateChanged(async user=>{if(!user){if(!me)authView();return}let id=null;try{id=localStorage.getItem("rc_id")}catch(e){}try{let s=null;if(id){s=await db.doc("accounts/"+id).get();if(!s.exists()||s.data().uid!==user.uid){id=null;s=null}}if(!id){const ix=await db.doc("uidIndex/"+user.uid).get();if(ix.exists()){id=ix.data().accountId||ix.data().username;if(id){s=await db.doc("accounts/"+id).get()}}}if(id&&s&&s.exists()&&s.data().uid===user.uid){start(id,s.data())}else if(!me)authView()}catch(e){console.warn("session restore",e);if(!me)authView()}})})();
 </script>
 </body>
 </html>
