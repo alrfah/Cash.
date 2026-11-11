@@ -1,0 +1,11 @@
+{
+  "name": "الرفاه كاش",
+  "short_name": "الرفاه كاش",
+  "start_url": "https://alrfah.github.io/Cash./",
+  "display": "standalone",
+  "background_color": "#171b26",
+  "theme_color": "#6a43f0",
+  "icons": [
+    {"src": "https://alrfah.github.io/Cash./favicon.ico", "sizes": "48x48", "type": "image/x-icon"}
+  ]
+}
