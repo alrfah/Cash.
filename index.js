@@ -7,6 +7,8 @@ const db = admin.database();
 const ADMIN_EMAIL = "smr57720@gmail.com";
 const CURRENCIES = new Set(["usd", "syp", "try"]);
 const ACCOUNT_RE = /^SY\d{24}$/;
+const ADMIN_ACCOUNT_EMAIL = ADMIN_EMAIL.toLowerCase();
+function transferFee(cur) { return cur === "usd" ? 0.1 : cur === "try" ? 2 : cur === "syp" ? 15 : 0; }
 
 function fail(code, message) {
   throw new functions.https.HttpsError(code, message);
@@ -39,7 +41,17 @@ exports.transferFunds = functions.https.onCall(async (data, context) => {
   const recipient = recipientSnap.val() || {};
   if (sender.uid !== uid) fail("permission-denied", "لا تملك هذا الحساب");
   if (sender.balanceSuspended) fail("failed-precondition", "الرصيد معلّق من الإدارة");
-  if (Number(sender[cur] || 0) < amount) fail("failed-precondition", "الرصيد غير كافٍ");
+  const fee = transferFee(cur);
+  const totalDebit = amount + fee;
+  if (Number(sender[cur] || 0) < totalDebit) fail("failed-precondition", `الرصيد غير كافٍ؛ العمولة ${fee}`);
+  const adminQuery = await db.ref("accounts").orderByChild("email").equalTo(ADMIN_EMAIL).once("value");
+  const adminValues = adminQuery.val() || {};
+  const adminId = Object.keys(adminValues)[0];
+  if (!adminId) fail("failed-precondition", "حساب العمولة غير مضبوط");
+  if (adminId === senderId || adminId === to) fail("failed-precondition", "حساب العمولة غير صالح");
+  const adminRef = db.ref(`accounts/${adminId}`);
+  const adminSnap = await adminRef.once("value");
+  if (!adminSnap.exists()) fail("not-found", "حساب العمولة غير موجود");
 
   // قفل قصير يمنع إرسال حوالتين متزامنتين من الحساب نفسه.
   const lockRef = db.ref(`transferLocks/${senderId}`);
@@ -48,10 +60,11 @@ exports.transferFunds = functions.https.onCall(async (data, context) => {
 
   let senderDebited = false;
   let recipientCredited = false;
+  let adminCredited = false;
   try {
     const debit = await senderRef.transaction(current => {
-      if (!current || current.uid !== uid || Number(current[cur] || 0) < amount) return;
-      return { ...current, [cur]: Number(current[cur] || 0) - amount };
+      if (!current || current.uid !== uid || Number(current[cur] || 0) < totalDebit) return;
+      return { ...current, [cur]: Number(current[cur] || 0) - totalDebit };
     });
     if (!debit.committed) fail("failed-precondition", "الرصيد غير كافٍ أو تغيّر؛ حاول مرة أخرى");
     senderDebited = true;
@@ -72,6 +85,8 @@ exports.transferFunds = functions.https.onCall(async (data, context) => {
       from: senderId,
       to,
       amount,
+      fee,
+      totalDebit,
       cur,
       type: "transfer",
       ts,
@@ -87,6 +102,7 @@ exports.transferFunds = functions.https.onCall(async (data, context) => {
       title: "وصلتك حوالة جديدة",
       text: `استلمت حوالة من ${senderName} بقيمة ${amountText}`,
       amount,
+      fee,
       cur,
       from: senderId,
       fromName: senderName,
@@ -107,7 +123,13 @@ exports.transferFunds = functions.https.onCall(async (data, context) => {
       // تعويض الخصم فقط إذا بقي الحساب كما هو بعد الخصم.
       await senderRef.transaction(current => {
         if (!current || current.uid !== uid) return;
-        return { ...current, [cur]: Number(current[cur] || 0) + amount };
+        return { ...current, [cur]: Number(current[cur] || 0) + totalDebit };
+      }).catch(() => {});
+    }
+    if (adminCredited) {
+      await adminRef.transaction(current => {
+        if (!current || Number(current[cur] || 0) < fee) return;
+        return { ...current, [cur]: Number(current[cur] || 0) - fee };
       }).catch(() => {});
     }
     if (err instanceof functions.https.HttpsError) throw err;
@@ -118,6 +140,25 @@ exports.transferFunds = functions.https.onCall(async (data, context) => {
   }
 });
 
+exports.deleteUserAccount = functions.https.onCall(async (data, context) => {
+  if (!context.auth || String(context.auth.token && context.auth.token.email || "").toLowerCase() !== ADMIN_ACCOUNT_EMAIL) {
+    fail("permission-denied", "غير مصرح بحذف الحسابات");
+  }
+  const accountId = String(data && data.accountId || "").trim();
+  if (!ACCOUNT_RE.test(accountId)) fail("invalid-argument", "رقم الحساب غير صالح");
+  const accountRef = db.ref(`accounts/${accountId}`);
+  const snap = await accountRef.once("value");
+  if (!snap.exists()) fail("not-found", "الحساب غير موجود");
+  const account = snap.val() || {};
+  if (String(account.email || "").toLowerCase() === ADMIN_ACCOUNT_EMAIL) fail("failed-precondition", "حساب المشرف محمي ولا يمكن حذفه");
+  const updates = {};
+  updates[`accounts/${accountId}`] = null;
+  if (account.uid) updates[`uidIndex/${account.uid}`] = null;
+  if (account.username) updates[`usernameIndex/${account.username}`] = null;
+  await db.ref().update(updates);
+  if (account.uid) { try { await admin.auth().deleteUser(account.uid); } catch (e) { if (e.code !== "auth/user-not-found") throw e; } }
+  return { deleted: true, accountId };
+});
 exports.sendUserPush = functions.https.onCall(async (data, context) => {
   if (!context.auth || String(context.auth.token && context.auth.token.email || "").toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
     fail("permission-denied", "غير مصرح بإرسال إشعارات الهاتف");
