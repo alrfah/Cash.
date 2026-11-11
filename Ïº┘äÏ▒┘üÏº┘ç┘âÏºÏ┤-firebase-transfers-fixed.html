@@ -475,18 +475,15 @@ async function send(){
 async function transferExecute(){
  const p=window.__pendingTransfer;if(!p)return;const b=$("#transferConfirmBtn"),m=$("#transferConfirmMsg");if(b){b.disabled=true;b.textContent="جارٍ تنفيذ الحوالة…"}
  try{
-  const [senderSnap,recipientSnap,adminSnap]=await Promise.all([ref("accounts/"+me.id).once("value"),ref("accounts/"+p.to).once("value"),ref("accounts/"+ADMIN_ACCOUNT_ID).once("value")]);
-  if(!senderSnap.exists()){m.textContent="تعذر قراءة رصيد المرسل؛ أعد تسجيل الدخول وحاول مرة أخرى";return}
-  if(!recipientSnap.exists()){m.textContent="رقم حساب المستلم غير موجود أو غير صحيح";return}
-  if(!adminSnap.exists()){m.textContent="حساب العمولة غير متاح حاليًا؛ تواصل مع الإدارة";return}
-  const sender=senderSnap.val()||{},recipient=recipientSnap.val()||{},adminAccount=adminSnap.val()||{},fee=transferFee(p.c),totalDebit=p.am+fee;
-  if(Number(sender[p.c]||0)<totalDebit){m.textContent=`الرصيد غير كافٍ؛ المبلغ المطلوب مع العمولة ${fmt(totalDebit)} ${CS[p.c]}`;return}
-  const ts=Date.now(),txRef=ref("tx").push(),noticeRef=ref("userNotifications/"+p.to).push(),senderName=sender.fullname||sender.username||me.id,recipientName=recipient.fullname||recipient.username||p.to;
-  const t={from:me.id,to:p.to,fromName:senderName,toName:recipientName,amount:p.am,fee,totalDebit,cur:p.c,type:"transfer",label:"حوالة",ts,id:txRef.key};
-  const updates={};updates["accounts/"+me.id+"/"+p.c]=Number(sender[p.c]||0)-totalDebit;updates["accounts/"+p.to+"/"+p.c]=Number(recipient[p.c]||0)+p.am;updates["accounts/"+ADMIN_ACCOUNT_ID+"/"+p.c]=Number(adminAccount[p.c]||0)+fee;updates["tx/"+txRef.key]=t;updates["userNotifications/"+p.to+"/"+noticeRef.key]={type:"transfer",title:"حوالة واردة",text:`وصلتك حوالة بقيمة ${fmt(p.am)} ${CS[p.c]} من ${senderName}`,amount:p.am,fee,cur:p.c,from:me.id,fromName:senderName,to:p.to,toName:recipientName,ts,read:false,txId:txRef.key};
-  await rtdb.ref().update(updates);window.__pendingTransfer=null;fullSuccess(t);
- }catch(e){const code=String(e&&e.code||"");m.textContent=code.includes("permission-denied")?"لا تملك صلاحية تنفيذ الحوالة؛ تحقق من قواعد Firebase":code.includes("network")?"تعذر الاتصال بـ Firebase؛ تحقق من الإنترنت":"تعذر تنفيذ الحوالة؛ تحقق من رقم الحساب والرصيد ثم حاول مرة أخرى"}
- finally{if(b&&b.isConnected){b.disabled=false;b.textContent="نعم، تأكيد الإرسال"}}
+  const call=firebase.functions().httpsCallable("transferFunds");
+  const result=await call({to:p.to,amount:p.am,cur:p.c});
+  const t=(result.data&&result.data.transfer)||{};
+  window.__pendingTransfer=null;
+  fullSuccess({...t,from:t.from||me.id,to:t.to||p.to,amount:Number(t.amount||p.am),fee:Number(t.fee||p.fee),totalDebit:Number(t.totalDebit||p.totalDebit),cur:t.cur||p.c,ts:t.ts||Date.now(),type:"transfer",label:"حوالة"});
+ }catch(e){
+  const code=String(e&&e.code||""),msg=String(e&&e.message||"");
+  m.textContent=code.includes("permission-denied")?"لا تملك صلاحية تنفيذ الحوالة؛ سجّل الدخول بالحساب الصحيح":code.includes("not-found")?"الحساب المستلم غير موجود أو تم حذفه":code.includes("failed-precondition")?msg:code.includes("invalid-argument")?msg:code.includes("network")?"تعذر الاتصال بالخادم؛ تحقق من الإنترنت":"تعذر تنفيذ الحوالة من الخادم؛ حاول مرة أخرى";
+ }finally{if(b&&b.isConnected){b.disabled=false;b.textContent="نعم، تأكيد الإرسال"}}
 }
 async function refreshCurrentSession(){
  const pl=$("#pullLoader"),label=pl&&pl.querySelector(".pull-label");
