@@ -1,0 +1,5 @@
+const STATIC_CACHE='alrafah-static-v5';
+self.addEventListener('install',()=>self.skipWaiting());
+self.addEventListener('activate',event=>event.waitUntil((async()=>{for(const key of await caches.keys())if(key.startsWith('alrafah-static-')&&key!==STATIC_CACHE)await caches.delete(key);await self.clients.claim()})()));
+self.addEventListener('fetch',event=>{const r=event.request,u=new URL(r.url);if(r.method!=='GET'||u.origin!==self.location.origin||!u.pathname.startsWith(new URL('./assets/',self.location.href).pathname)||r.headers.has('Authorization'))return;event.respondWith((async()=>{const c=await caches.open(STATIC_CACHE),hit=await c.match(r);if(hit)return hit;const response=await fetch(r);if(response.ok)await c.put(r,response.clone());return response})())});
+self.addEventListener('notificationclick',event=>{event.notification.close();const target=new URL(event.notification.data?.url||'./',self.location.href);if(target.origin!==self.location.origin)return;event.waitUntil(self.clients.matchAll({type:'window'}).then(list=>{const existing=list.find(w=>new URL(w.url).origin===target.origin);return existing?existing.focus():self.clients.openWindow(target.href)}))});
